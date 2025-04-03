@@ -2,9 +2,14 @@ const express = require("express");
 
 const app = express();
 
-app.get("/user", (req, res) => {
-  console.log(req.query);
-  res.send({ firstName: "Ayush", lastName: "Agarwal" });
+const { userAuth } = require("./middlewares/auth");
+
+app.get("/user/login", (req, res) => {
+  res.send("user login");
+});
+
+app.get("/user/data", userAuth, (req, res) => {
+  res.send("user data");
 });
 
 app.listen(7777, () => {
