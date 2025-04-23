@@ -24,7 +24,6 @@ const validateEditProfileData = (req) => {
   const allowedEditFields = [
     "firstName",
     "lastName",
-    "emailId",
     "photoUrl",
     "gender",
     "age",
@@ -32,7 +31,7 @@ const validateEditProfileData = (req) => {
     "skills",
   ];
 
-  const { firstName, lastName, emailId, photoUrl, gender, age, about, skills } =
+  const { firstName, lastName, photoUrl, gender, age, about, skills } =
     req.body;
 
   const isEditAllowed = Object.keys(req.body).every((key) =>
@@ -43,8 +42,6 @@ const validateEditProfileData = (req) => {
     throw new Error("First name must be between 3 and 50 characters long");
   } else if (lastName && (lastName?.length < 3 || lastName?.length > 50)) {
     throw new Error("Last name must be between 3 and 50 characters long");
-  } else if (emailId && !validator.isEmail(emailId)) {
-    throw new Error("Invalid email");
   } else if (photoUrl && !validator.isURL(photoUrl)) {
     throw new Error("Invalid photo URL");
   } else if (gender && !["male", "female", "other"].includes(gender)) {

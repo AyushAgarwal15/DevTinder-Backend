@@ -48,9 +48,7 @@ profileRouter.patch("/profile/password", userAuth, async (req, res) => {
       throw new Error("Invalid Old Password");
     }
 
-    if (!validateEditPasswordData(req)) {
-      throw new Error("Invalid Edit Fields");
-    }
+    validateEditPasswordData(req);
 
     const encryptedNewPassword = await bcrypt.hash(newPassword, 10);
     loggedInUser.password = encryptedNewPassword;
