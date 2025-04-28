@@ -2,6 +2,7 @@ const express = require("express");
 const profileRouter = express.Router();
 const bcrypt = require("bcrypt");
 const { userAuth } = require("../middlewares/auth");
+const User = require("../models/user");
 const {
   validateEditProfileData,
   validateEditPasswordData,
@@ -10,6 +11,21 @@ const {
 profileRouter.get("/profile/view", userAuth, async (req, res) => {
   try {
     const user = req.user;
+    res.send(user);
+  } catch (err) {
+    res.status(400).send("ERROR : " + err.message);
+  }
+});
+
+profileRouter.get("/profile/view/:userId", userAuth, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const user = await User.findById(userId).select(
+      "firstName lastName photoUrl age"
+    );
+    if (!user) {
+      throw new Error("User not found");
+    }
     res.send(user);
   } catch (err) {
     res.status(400).send("ERROR : " + err.message);
