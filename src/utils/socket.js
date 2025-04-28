@@ -7,6 +7,10 @@ const connectionRequest = require("../models/connectionRequest");
 // You should store this in an environment variable
 const JWT_SECRET = "ayush@secret.8126";
 
+// Simple maps to track users and their current active chat room
+const activeUsers = new Map(); // userId -> socketId
+const userCurrentChatRoom = new Map(); // userId -> targetUserId they're chatting with
+
 const getSecretChatRoomId = (userId, targetUserId) => {
   const chatRoomId = [userId, targetUserId].sort().join("-$%^&*#@!~");
   return crypto.createHash("sha256").update(chatRoomId).digest("hex");
@@ -18,8 +22,8 @@ const initializeSocket = (server) => {
       origin: "http://localhost:5173",
       credentials: true,
     },
-    pingTimeout: 60000, // 1 minute without a pong packet to consider the connection closed
-    pingInterval: 25000, // send a ping packet every 25 seconds
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   // Add authentication middleware
@@ -50,17 +54,15 @@ const initializeSocket = (server) => {
     }
   });
 
-  // Track active users
-  const activeUsers = new Map();
-
   io.on("connection", (socket) => {
-    console.log(`User ${socket.user.id} connected`);
+    const userId = socket.user.id;
+    console.log(`User ${userId} connected with socket ID ${socket.id}`);
 
-    // Add user to active users
-    activeUsers.set(socket.user.id, socket.id);
+    // Register this user's socket connection
+    activeUsers.set(userId, socket.id);
 
-    // Send active status to relevant users
-    socket.broadcast.emit("userOnline", { userId: socket.user.id });
+    // User is not in any chat room initially
+    userCurrentChatRoom.delete(userId);
 
     socket.on("joinChat", ({ firstName, userId, targetUserId }) => {
       // Additional validation to ensure user can only join their own chats
@@ -69,18 +71,17 @@ const initializeSocket = (server) => {
         return;
       }
 
+      console.log(
+        `${firstName} (${userId}) is now chatting with ${targetUserId}`
+      );
+
+      // Record that this user is now chatting with the target user
+      userCurrentChatRoom.set(userId, targetUserId);
+
       const chatRoomId = getSecretChatRoomId(userId, targetUserId);
 
-      // Leave all other rooms before joining this one
-      const rooms = [...socket.rooms];
-      rooms.forEach((room) => {
-        if (room !== socket.id) {
-          socket.leave(room);
-        }
-      });
-
+      // Join the chat room
       socket.join(chatRoomId);
-      console.log(`${firstName} joined chat room: ${chatRoomId}`);
 
       // Notify the room that user has joined
       socket.to(chatRoomId).emit("userJoined", { userId, firstName });
@@ -178,9 +179,35 @@ const initializeSocket = (server) => {
 
           await chat.save();
 
-          // Emit the message to all clients in the room
+          // Emit the message to the chat room for anyone in it
           io.to(chatRoomId).emit("receivedMessage", message);
-          console.log(`Message sent to chat room ${chatRoomId}:`, message);
+
+          // Check if target user is connected
+          const targetSocketId = activeUsers.get(targetUserId);
+
+          if (targetSocketId) {
+            // Get who target user is currently chatting with
+            const targetUserCurrentChat = userCurrentChatRoom.get(targetUserId);
+
+            // If target user is not chatting with the sender, send a notification
+            if (targetUserCurrentChat !== userId) {
+              console.log(
+                `Sending notification to ${targetUserId} about message from ${firstName}`
+              );
+              io.to(targetSocketId).emit("messageNotification", {
+                ...message,
+                notification: true, // Add flag to identify this as a notification
+              });
+            } else {
+              console.log(
+                `No notification needed - ${targetUserId} is already chatting with ${userId}`
+              );
+            }
+          } else {
+            console.log(
+              `Target user ${targetUserId} is not connected, can't send notification`
+            );
+          }
         } catch (error) {
           console.error("Error saving message to database:", error);
           socket.emit("error", { message: "Failed to save message" });
@@ -188,18 +215,34 @@ const initializeSocket = (server) => {
       }
     );
 
+    socket.on("leaveChat", ({ userId, targetUserId }) => {
+      if (userId !== socket.user.id) {
+        socket.emit("error", { message: "Unauthorized action" });
+        return;
+      }
+
+      console.log(`${userId} is no longer chatting with ${targetUserId}`);
+      userCurrentChatRoom.delete(userId);
+
+      const chatRoomId = getSecretChatRoomId(userId, targetUserId);
+      socket.leave(chatRoomId);
+    });
+
     socket.on("disconnect", () => {
-      console.log(`User ${socket.user.id} disconnected`);
+      console.log(`User ${userId} disconnected`);
 
       // Remove user from active users
-      activeUsers.delete(socket.user.id);
+      activeUsers.delete(userId);
 
-      // Broadcast user offline status
-      socket.broadcast.emit("userOffline", { userId: socket.user.id });
+      // Clear chat room tracking
+      userCurrentChatRoom.delete(userId);
+
+      // Let others know this user is offline
+      socket.broadcast.emit("userOffline", { userId });
     });
   });
 
-  return io; // Return io instance for potential use elsewhere
+  return io;
 };
 
 module.exports = initializeSocket;
