@@ -86,16 +86,6 @@ const userSchema = new mongoose.Schema(
     },
     skills: {
       type: [String],
-      validate: [
-        {
-          validator: (arr) => arr.length <= 5,
-          message: "You can only add up to 5 skills.",
-        },
-        {
-          validator: (arr) => arr.every((skill) => skill.length <= 20),
-          message: "Each skill must be at most 20 characters long.",
-        },
-      ],
     },
     linkedinUrl: {
       type: String,

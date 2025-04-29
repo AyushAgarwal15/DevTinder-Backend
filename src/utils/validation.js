@@ -63,8 +63,8 @@ const validateEditProfileData = (req) => {
     throw new Error("Invalid age");
   } else if (about && about?.length > 500) {
     throw new Error("About field must be less than 500 characters long");
-  } else if (skills && skills?.length > 10) {
-    throw new Error("Skills field must not exceed 10 skills");
+  } else if (skills && skills?.length > 15) {
+    throw new Error("Skills field must not exceed 15 skills");
   } else if (linkedinUrl && !validator.isURL(linkedinUrl)) {
     throw new Error("Invalid LinkedIn URL");
   } else if (githubUrl && !validator.isURL(githubUrl)) {
