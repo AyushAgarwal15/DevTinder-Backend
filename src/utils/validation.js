@@ -29,10 +29,23 @@ const validateEditProfileData = (req) => {
     "age",
     "about",
     "skills",
+    "linkedinUrl",
+    "githubUrl",
+    "portfolioUrl",
   ];
 
-  const { firstName, lastName, photoUrl, gender, age, about, skills } =
-    req.body;
+  const {
+    firstName,
+    lastName,
+    photoUrl,
+    gender,
+    age,
+    about,
+    skills,
+    linkedinUrl,
+    githubUrl,
+    portfolioUrl,
+  } = req.body;
 
   const isEditAllowed = Object.keys(req.body).every((key) =>
     allowedEditFields.includes(key)
@@ -52,6 +65,12 @@ const validateEditProfileData = (req) => {
     throw new Error("About field must be less than 500 characters long");
   } else if (skills && skills?.length > 10) {
     throw new Error("Skills field must not exceed 10 skills");
+  } else if (linkedinUrl && !validator.isURL(linkedinUrl)) {
+    throw new Error("Invalid LinkedIn URL");
+  } else if (githubUrl && !validator.isURL(githubUrl)) {
+    throw new Error("Invalid GitHub URL");
+  } else if (portfolioUrl && !validator.isURL(portfolioUrl)) {
+    throw new Error("Invalid Portfolio URL");
   }
 
   return isEditAllowed;

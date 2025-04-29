@@ -21,7 +21,7 @@ profileRouter.get("/profile/view/:userId", userAuth, async (req, res) => {
   try {
     const userId = req.params.userId;
     const user = await User.findById(userId).select(
-      "firstName lastName photoUrl age"
+      "firstName lastName photoUrl age gender skills about linkedinUrl githubUrl portfolioUrl"
     );
     if (!user) {
       throw new Error("User not found");

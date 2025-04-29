@@ -4,7 +4,8 @@ const User = require("../models/user");
 const ConnectionRequest = require("../models/connectionRequest");
 const userRouter = express.Router();
 
-const USER_SAFE_DATA = "firstName lastName photoUrl age gender about skills";
+const USER_SAFE_DATA =
+  "firstName lastName photoUrl age gender about skills linkedinUrl githubUrl portfolioUrl";
 
 // Get all the received connection request for the loggedIn User
 userRouter.get("/user/requests/received", userAuth, async (req, res) => {
@@ -51,6 +52,53 @@ userRouter.get("/user/connections", userAuth, async (req, res) => {
     res.status(400).send("ERROR " + err.message);
   }
 });
+
+// Remove a connection
+userRouter.delete(
+  "/user/connections/:connectionId",
+  userAuth,
+  async (req, res) => {
+    try {
+      const loggedInUser = req.user;
+      const connectionId = req.params.connectionId;
+
+      // Find the connection request document where:
+      // 1. Either the logged-in user is the sender or the receiver
+      // 2. The other user is the one specified in the params
+      // 3. The status is "accepted" (it's an active connection)
+      const connectionRequest = await ConnectionRequest.findOne({
+        $or: [
+          {
+            fromUserId: loggedInUser._id,
+            toUserId: connectionId,
+            status: "accepted",
+          },
+          {
+            toUserId: loggedInUser._id,
+            fromUserId: connectionId,
+            status: "accepted",
+          },
+        ],
+      });
+
+      if (!connectionRequest) {
+        return res.status(404).json({ message: "Connection not found" });
+      }
+
+      // Delete the connection
+      await ConnectionRequest.deleteOne({ _id: connectionRequest._id });
+
+      res.json({
+        message: "Connection removed successfully",
+        connectionRequestId: connectionRequest._id,
+      });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ message: "Error removing connection: " + err.message });
+    }
+  }
+);
 
 userRouter.get("/feed", userAuth, async (req, res) => {
   try {

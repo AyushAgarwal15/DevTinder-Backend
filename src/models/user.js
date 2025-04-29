@@ -97,6 +97,33 @@ const userSchema = new mongoose.Schema(
         },
       ],
     },
+    linkedinUrl: {
+      type: String,
+      default: "",
+      validate(value) {
+        if (value && !validator.isURL(value)) {
+          throw new Error("Invalid LinkedIn URL");
+        }
+      },
+    },
+    githubUrl: {
+      type: String,
+      default: "",
+      validate(value) {
+        if (value && !validator.isURL(value)) {
+          throw new Error("Invalid GitHub URL");
+        }
+      },
+    },
+    portfolioUrl: {
+      type: String,
+      default: "",
+      validate(value) {
+        if (value && !validator.isURL(value)) {
+          throw new Error("Invalid Portfolio URL");
+        }
+      },
+    },
   },
   { timestamps: true }
 );
