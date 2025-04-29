@@ -4,9 +4,6 @@ const jwt = require("jsonwebtoken");
 const { Chat } = require("../models/chat");
 const connectionRequest = require("../models/connectionRequest");
 
-// You should store this in an environment variable
-const JWT_SECRET = "ayush@secret.8126";
-
 // Simple maps to track users and their current active chat room
 const activeUsers = new Map(); // userId -> socketId
 const userCurrentChatRoom = new Map(); // userId -> targetUserId they're chatting with
@@ -19,7 +16,7 @@ const getSecretChatRoomId = (userId, targetUserId) => {
 const initializeSocket = (server) => {
   const io = socket(server, {
     cors: {
-      origin: "http://localhost:5173",
+      origin: process.env.CLIENT_ORIGIN,
       credentials: true,
     },
     pingTimeout: 60000,
@@ -36,7 +33,7 @@ const initializeSocket = (server) => {
 
     try {
       // Verify the token
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
       console.log("Decoded token:", decoded);
 
       // Store user data in socket object

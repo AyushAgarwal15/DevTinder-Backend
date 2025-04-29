@@ -1,3 +1,7 @@
+const path = require("path");
+const envPath = path.resolve(process.cwd(), ".env");
+
+require("dotenv").config({ path: envPath });
 const express = require("express");
 const connectDB = require("./config/database");
 const app = express();
@@ -7,7 +11,7 @@ const http = require("http");
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: process.env.CLIENT_ORIGIN,
     credentials: true,
   })
 );
@@ -34,8 +38,8 @@ initializeSocket(server);
 connectDB()
   .then(() => {
     console.log("Database connection established.");
-    server.listen(7777, () => {
-      console.log("Server is running on port 7777");
+    server.listen(process.env.PORT, () => {
+      console.log(`Server is running on port ${process.env.PORT}`);
     });
   })
   .catch((err) => {
