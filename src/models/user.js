@@ -40,14 +40,17 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: true,
+      required: function () {
+        // Only require password if githubId is not present
+        return !this.githubId;
+      },
       minlength: [
         6,
         " Password must be at least 6 characters long, got {VALUE}",
       ],
       maxlength: 100,
       validate(value) {
-        if (!validator.isStrongPassword(value)) {
+        if (value && !validator.isStrongPassword(value)) {
           throw new Error("Password is not strong enough");
         }
       },
@@ -113,6 +116,32 @@ const userSchema = new mongoose.Schema(
           throw new Error("Invalid Portfolio URL");
         }
       },
+    },
+    // GitHub Integration Fields
+    githubId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    githubData: {
+      type: Object,
+      default: null,
+    },
+    githubRepos: {
+      type: Array,
+      default: [],
+    },
+    githubLanguages: {
+      type: [String],
+      default: [],
+    },
+    topRepositories: {
+      type: Array,
+      default: [],
+    },
+    contributionStats: {
+      type: Object,
+      default: null,
     },
   },
   { timestamps: true }
