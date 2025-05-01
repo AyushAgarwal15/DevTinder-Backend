@@ -4,14 +4,21 @@ const githubRouter = express.Router();
 const User = require("../models/user");
 const { userAuth } = require("../middlewares/auth");
 
+// Helper function to get the correct callback URL
+const getCallbackURL = (path) => {
+  // For production deployment
+  if (process.env.NODE_ENV === "production") {
+    return `https://devtinder-backend.vercel.app${path}`;
+  }
+  // For local development
+  return `${process.env.CLIENT_ORIGIN.replace("5173", "7777")}${path}`;
+};
+
 // Initiate GitHub OAuth flow
 githubRouter.get("/auth/github", (req, res) => {
   const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${
     process.env.GITHUB_CLIENT_ID
-  }&redirect_uri=${process.env.CLIENT_ORIGIN.replace(
-    "5173",
-    "7777"
-  )}/auth/github/callback&scope=user,repo`;
+  }&redirect_uri=${getCallbackURL("/auth/github/callback")}&scope=user,repo`;
   res.redirect(githubAuthUrl);
 });
 
@@ -27,10 +34,7 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
         client_id: process.env.GITHUB_CLIENT_ID,
         client_secret: process.env.GITHUB_CLIENT_SECRET,
         code,
-        redirect_uri: `${process.env.CLIENT_ORIGIN.replace(
-          "5173",
-          "7777"
-        )}/auth/github/callback`,
+        redirect_uri: getCallbackURL("/auth/github/callback"),
       },
       {
         headers: {
@@ -117,10 +121,9 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
 githubRouter.get("/connect/github", userAuth, (req, res) => {
   const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${
     process.env.GITHUB_CLIENT_ID
-  }&redirect_uri=${process.env.CLIENT_ORIGIN.replace(
-    "5173",
-    "7777"
-  )}/auth/github/callback/connect&scope=user,repo&state=${req.user._id}`;
+  }&redirect_uri=${getCallbackURL(
+    "/auth/github/callback/connect"
+  )}&scope=user,repo&state=${req.user._id}`;
   res.redirect(githubAuthUrl);
 });
 
@@ -144,10 +147,7 @@ githubRouter.get(
           client_id: process.env.GITHUB_CLIENT_ID,
           client_secret: process.env.GITHUB_CLIENT_SECRET,
           code,
-          redirect_uri: `${process.env.CLIENT_ORIGIN.replace(
-            "5173",
-            "7777"
-          )}/auth/github/callback/connect`,
+          redirect_uri: getCallbackURL("/auth/github/callback/connect"),
         },
         {
           headers: {
