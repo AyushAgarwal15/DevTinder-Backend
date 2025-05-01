@@ -107,6 +107,9 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
     // Add token to cookie
     res.cookie("token", token, {
       expires: new Date(Date.now() + 8 * 3600000),
+      sameSite: "none",
+      secure: true,
+      httpOnly: true,
     });
 
     // Redirect to frontend
@@ -192,6 +195,17 @@ githubRouter.get(
 
       // Fetch and update GitHub repos
       await updateGithubRepos(req.user._id, access_token);
+
+      // Issue JWT
+      const token = await req.user.getJWT();
+
+      // Add token to cookie
+      res.cookie("token", token, {
+        expires: new Date(Date.now() + 8 * 3600000),
+        sameSite: "none",
+        secure: true,
+        httpOnly: true,
+      });
 
       // Redirect to frontend profile page
       res.redirect(`${process.env.CLIENT_ORIGIN}/profile`);
