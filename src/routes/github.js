@@ -25,9 +25,12 @@ githubRouter.get("/auth/github", (req, res) => {
 // GitHub OAuth callback
 githubRouter.get("/auth/github/callback", async (req, res) => {
   try {
+    console.log("GitHub OAuth callback received");
     const { code } = req.query;
+    console.log("GitHub code received:", code ? "Present" : "Missing");
 
     // Exchange code for access token
+    console.log("Exchanging code for access token...");
     const tokenResponse = await axios.post(
       "https://github.com/login/oauth/access_token",
       {
@@ -43,6 +46,7 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
       }
     );
 
+    console.log("Token received:", tokenResponse.data ? "Success" : "Failed");
     const { access_token } = tokenResponse.data;
 
     // Get user info from GitHub
@@ -103,8 +107,10 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
 
     // Issue JWT
     const token = await user.getJWT();
+    console.log("JWT token generated for user:", user._id.toString());
 
     // Add token to cookie
+    console.log("Setting cookies with sameSite=none, secure=true");
     res.cookie("token", token, {
       expires: new Date(Date.now() + 8 * 3600000),
       sameSite: "none",
@@ -113,6 +119,7 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
     });
 
     // Redirect to frontend
+    console.log("Redirecting to:", `${process.env.CLIENT_ORIGIN}/profile`);
     res.redirect(`${process.env.CLIENT_ORIGIN}/profile`);
   } catch (error) {
     console.error("GitHub OAuth Error:", error);
