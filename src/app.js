@@ -24,6 +24,7 @@ const requestRouter = require("./routes/request");
 const userRouter = require("./routes/user");
 const chatRouter = require("./routes/chat");
 const githubRouter = require("./routes/github");
+const testRouter = require("./routes/test");
 
 const initializeSocket = require("./utils/socket");
 
@@ -33,6 +34,7 @@ app.use("/", requestRouter);
 app.use("/", userRouter);
 app.use("/", chatRouter);
 app.use("/", githubRouter);
+app.use("/", testRouter);
 
 const server = http.createServer(app);
 initializeSocket(server);
