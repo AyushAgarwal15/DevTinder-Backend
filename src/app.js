@@ -37,13 +37,27 @@ app.use("/", githubRouter);
 const server = http.createServer(app);
 initializeSocket(server);
 
-connectDB()
-  .then(() => {
-    console.log("Database connection established.");
-    server.listen(process.env.PORT, () => {
-      console.log(`Server is running on port ${process.env.PORT}`);
+// And modify your server startup to only run when not in production:
+if (process.env.NODE_ENV !== "production") {
+  connectDB()
+    .then(() => {
+      console.log("Database connection established.");
+      server.listen(process.env.PORT || 3000, () => {
+        console.log(`Server is running on port ${process.env.PORT || 3000}`);
+      });
+    })
+    .catch((err) => {
+      console.error("Database can not be connected!!", err);
     });
-  })
-  .catch((err) => {
-    console.error("Database can not be connected!!", err);
-  });
+} else {
+  // For Vercel, still connect to DB but don't start the server
+  connectDB()
+    .then(() => {
+      console.log("Database connection established in production.");
+    })
+    .catch((err) => {
+      console.error("Database can not be connected!!", err);
+    });
+}
+
+module.exports = app;
