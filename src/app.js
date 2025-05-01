@@ -9,12 +9,36 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const http = require("http");
 
+// Define allowed origins
+const allowedOrigins = [
+  process.env.CLIENT_ORIGIN,
+  "https://devtinder-ayush.vercel.app",
+  "http://localhost:5173",
+];
+
+// Configure CORS with more options
 app.use(
   cors({
-    origin: [process.env.CLIENT_ORIGIN, "https://devtinder-ayush.vercel.app"],
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps, curl requests)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        console.log("Blocked by CORS:", origin);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   })
 );
+
+// For preflight requests
+app.options("*", cors());
+
 app.use(express.json());
 app.use(cookieParser());
 
