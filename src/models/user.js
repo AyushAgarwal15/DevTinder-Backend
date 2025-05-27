@@ -74,7 +74,7 @@ const userSchema = new mongoose.Schema(
     photoUrl: {
       type: String,
       default:
-        "https://tamilnaducouncil.ac.in/wp-content/uploads/2020/04/dummy-avatar.jpg",
+        "https://res.cloudinary.com/devtinder/image/upload/v1/devtinder_profiles/default-avatar.png",
       validate(value) {
         if (!validator.isURL(value)) {
           throw new Error("Invalid URL: " + value);

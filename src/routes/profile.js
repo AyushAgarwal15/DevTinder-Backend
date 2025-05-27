@@ -7,6 +7,23 @@ const {
   validateEditProfileData,
   validateEditPasswordData,
 } = require("../utils/validation");
+const multer = require("multer");
+const { uploadImage } = require("../utils/cloudinary");
+
+// Configure multer for memory storage
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Not an image! Please upload an image."), false);
+    }
+  },
+});
 
 profileRouter.get("/profile/view", userAuth, async (req, res) => {
   try {
@@ -101,5 +118,37 @@ profileRouter.patch("/profile/password", userAuth, async (req, res) => {
     res.status(400).send("ERROR : " + err.message);
   }
 });
+
+// Upload profile picture
+profileRouter.post(
+  "/profile/upload-photo",
+  userAuth,
+  upload.single("photo"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        throw new Error("Please upload an image");
+      }
+
+      // Convert buffer to base64
+      const base64Image = `data:${
+        req.file.mimetype
+      };base64,${req.file.buffer.toString("base64")}`;
+
+      // Upload to Cloudinary
+      const imageUrl = await uploadImage(base64Image);
+
+      // Update user's photoUrl
+      const user = req.user;
+      user.photoUrl = imageUrl;
+      await user.save();
+
+      res.json({ photoUrl: imageUrl });
+    } catch (err) {
+      console.error("Error uploading photo:", err);
+      res.status(400).send(err.message);
+    }
+  }
+);
 
 module.exports = profileRouter;
