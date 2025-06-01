@@ -55,29 +55,31 @@ const cookieConfig = {
 };
 app.use(cookieParser(process.env.COOKIE_SECRET, cookieConfig));
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({
-    status: "healthy",
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString(),
-  });
-});
-
 // Initialize database connection before setting up routes
 let isConnected = false;
 let connectionRetries = 0;
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 5;
+const RETRY_INTERVAL = 2000;
 
-// Middleware to ensure database connection
+// Middleware to ensure database connection with timeout
 const ensureDbConnected = async (req, res, next) => {
   if (!isConnected) {
     try {
       while (!isConnected && connectionRetries < MAX_RETRIES) {
         try {
-          await connectDB();
+          await Promise.race([
+            connectDB(),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error("Connection attempt timed out")),
+                15000
+              )
+            ),
+          ]);
           isConnected = true;
+          connectionRetries = 0; // Reset retries on successful connection
           console.log("Database connection established.");
+          break;
         } catch (error) {
           connectionRetries++;
           console.error(
@@ -85,25 +87,40 @@ const ensureDbConnected = async (req, res, next) => {
             error
           );
           if (connectionRetries === MAX_RETRIES) {
-            throw error;
+            throw new Error("Maximum connection retries reached");
           }
-          // Wait before retrying
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL));
         }
       }
     } catch (error) {
       console.error("All database connection attempts failed:", error);
-      return res.status(500).json({
+      return res.status(503).json({
         status: "error",
-        message: "Database connection failed. Please try again later.",
+        message: "Service temporarily unavailable. Please try again later.",
       });
     }
   }
   next();
 };
 
-// Apply the database connection middleware to all routes
-app.use(ensureDbConnected);
+// Apply the database connection middleware to all routes except health check
+app.use((req, res, next) => {
+  if (req.path === "/health") {
+    return next();
+  }
+  return ensureDbConnected(req, res, next);
+});
+
+// Health check endpoint with detailed status
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    database: isConnected ? "connected" : "disconnected",
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString(),
+    retries: connectionRetries,
+  });
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -150,30 +167,52 @@ try {
 // Start server based on environment
 if (process.env.NODE_ENV !== "production") {
   // Development
-  connectDB()
-    .then(() => {
+  const startServer = async () => {
+    try {
+      await Promise.race([
+        connectDB(),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Initial connection timed out")),
+            30000
+          )
+        ),
+      ]);
       isConnected = true;
       console.log("Database connection established.");
       const port = process.env.PORT || 3000;
       server.listen(port, () => {
         console.log(`Server is running on port ${port}`);
       });
-    })
-    .catch((err) => {
-      console.error("Database connection failed:", err);
+    } catch (err) {
+      console.error("Failed to start server:", err);
       process.exit(1);
-    });
+    }
+  };
+
+  startServer();
 } else {
   // Production (Vercel)
-  connectDB()
-    .then(() => {
+  const initializeProduction = async () => {
+    try {
+      await Promise.race([
+        connectDB(),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Initial connection timed out")),
+            30000
+          )
+        ),
+      ]);
       isConnected = true;
       console.log("Database connection established in production.");
-    })
-    .catch((err) => {
+    } catch (err) {
       console.error("Database connection failed in production:", err);
       // Don't exit in production, let Vercel handle the error
-    });
+    }
+  };
+
+  initializeProduction();
 }
 
 // Handle uncaught exceptions and rejections

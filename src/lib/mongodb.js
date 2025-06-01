@@ -1,5 +1,8 @@
 const mongoose = require("mongoose");
 
+// Disable mongoose buffering globally
+mongoose.set("bufferCommands", false);
+
 let cached = global.mongoose;
 
 if (!cached) {
@@ -19,20 +22,25 @@ async function connectToDatabase() {
 
   if (!cached.promise) {
     const opts = {
-      bufferCommands: true,
-      serverSelectionTimeoutMS: 60000,
-      socketTimeoutMS: 60000,
-      maxIdleTimeMS: 60000,
-      maxPoolSize: 10,
-      minPoolSize: 1,
+      bufferCommands: false, // Disable buffering
+      serverSelectionTimeoutMS: 30000, // Reduced from 60000
+      socketTimeoutMS: 45000, // Reduced from 60000
+      maxIdleTimeMS: 45000, // Reduced from 60000
+      maxPoolSize: 50, // Increased from 10
+      minPoolSize: 10, // Increased from 1
       family: 4,
       autoIndex: true,
       retryWrites: true,
       retryReads: true,
-      connectTimeoutMS: 30000,
-      heartbeatFrequencyMS: 10000,
+      connectTimeoutMS: 20000,
+      heartbeatFrequencyMS: 5000,
       keepAlive: true,
-      keepAliveInitialDelay: 300000,
+      keepAliveInitialDelay: 30000,
+      autoCreate: true,
+      writeConcern: {
+        w: "majority",
+        j: true,
+      },
     };
 
     cached.promise = mongoose
@@ -45,11 +53,8 @@ async function connectToDatabase() {
           console.error("MongoDB connection error:", err);
           cached.conn = null;
           cached.promise = null;
-          // Attempt to reconnect
-          setTimeout(() => {
-            console.log("Attempting to reconnect to MongoDB...");
-            connectToDatabase().catch(console.error);
-          }, 5000);
+          // Attempt to reconnect immediately
+          connectToDatabase().catch(console.error);
         });
 
         // Handle disconnection
@@ -57,11 +62,8 @@ async function connectToDatabase() {
           console.log("MongoDB disconnected");
           cached.conn = null;
           cached.promise = null;
-          // Attempt to reconnect
-          setTimeout(() => {
-            console.log("Attempting to reconnect to MongoDB...");
-            connectToDatabase().catch(console.error);
-          }, 5000);
+          // Attempt to reconnect immediately
+          connectToDatabase().catch(console.error);
         });
 
         // Handle successful reconnection
@@ -92,8 +94,13 @@ async function connectToDatabase() {
 
   try {
     cached.conn = await cached.promise;
+    // Verify connection is successful
+    if (cached.conn.connection.readyState !== 1) {
+      throw new Error("Failed to establish MongoDB connection");
+    }
   } catch (e) {
     cached.promise = null;
+    cached.conn = null;
     console.error("MongoDB connection error:", e);
     throw e;
   }
