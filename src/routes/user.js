@@ -5,7 +5,7 @@ const ConnectionRequest = require("../models/connectionRequest");
 const userRouter = express.Router();
 
 const USER_SAFE_DATA =
-  "firstName lastName photoUrl age gender about skills linkedinUrl githubUrl portfolioUrl";
+  "firstName lastName photoUrl age gender about skills linkedinUrl githubUrl portfolioUrl githubData githubLanguages contributionStats";
 
 // Get all the received connection request for the loggedIn User
 userRouter.get("/user/requests/received", userAuth, async (req, res) => {
@@ -103,6 +103,7 @@ userRouter.delete(
 userRouter.get("/feed", userAuth, async (req, res) => {
   try {
     const loggedInUser = req.user;
+    const userId = loggedInUser._id || `github_${loggedInUser.githubId}`;
 
     const page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 10;
@@ -110,7 +111,7 @@ userRouter.get("/feed", userAuth, async (req, res) => {
     const skip = (page - 1) * limit;
 
     const connectionRequests = await ConnectionRequest.find({
-      $or: [{ fromUserId: loggedInUser._id }, { toUserId: loggedInUser._id }],
+      $or: [{ fromUserId: userId }, { toUserId: userId }],
     }).select("fromUserId toUserId");
 
     const hideUsersFromFeed = new Set();
@@ -119,15 +120,48 @@ userRouter.get("/feed", userAuth, async (req, res) => {
       hideUsersFromFeed.add(req.toUserId.toString());
     });
 
-    const users = await User.find({
-      $and: [
-        { _id: { $nin: Array.from(hideUsersFromFeed) } },
-        { _id: { $ne: loggedInUser._id } },
-      ],
-    })
-      .select(USER_SAFE_DATA)
-      .skip(skip)
-      .limit(limit);
+    // For GitHub users, we need to handle the case where they might not be in MongoDB
+    let users;
+    if (loggedInUser.isGitHubUser) {
+      // For GitHub users, we'll only show MongoDB users
+      users = await User.find({
+        _id: { $nin: Array.from(hideUsersFromFeed) },
+      })
+        .select(USER_SAFE_DATA)
+        .skip(skip)
+        .limit(limit);
+    } else {
+      // For MongoDB users, show both MongoDB users and GitHub users
+      users = await User.find({
+        $and: [
+          { _id: { $nin: Array.from(hideUsersFromFeed) } },
+          { _id: { $ne: userId } },
+        ],
+      })
+        .select(USER_SAFE_DATA)
+        .skip(skip)
+        .limit(limit);
+    }
+
+    // Add default values for GitHub-specific fields if they don't exist
+    users = users.map((user) => {
+      const userData = user.toObject();
+      if (!userData.githubData) {
+        userData.githubData = null;
+      }
+      if (!userData.githubLanguages) {
+        userData.githubLanguages = [];
+      }
+      if (!userData.contributionStats) {
+        userData.contributionStats = {
+          totalRepos: 0,
+          totalStars: 0,
+          totalForks: 0,
+          languages: {},
+        };
+      }
+      return userData;
+    });
 
     res.json({ data: users });
   } catch (err) {

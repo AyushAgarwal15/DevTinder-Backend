@@ -13,19 +13,35 @@ async function connectToDatabase() {
 
   if (!cached.promise) {
     const opts = {
-      bufferCommands: false,
+      bufferCommands: true,
       serverSelectionTimeoutMS: 60000,
       socketTimeoutMS: 60000,
-      maxIdleTimeMS: 60000, // Match with your Vercel function timeout
+      maxIdleTimeMS: 60000,
       maxPoolSize: 10,
       minPoolSize: 1,
-      family: 4, // Use IPv4, skip trying IPv6
+      family: 4,
+      autoIndex: true,
+      retryWrites: true,
+      retryReads: true,
     };
 
     cached.promise = mongoose
       .connect(process.env.MONGODB_URI, opts)
       .then((mongoose) => {
         console.log("MongoDB connected successfully");
+
+        mongoose.connection.on("error", (err) => {
+          console.error("MongoDB connection error:", err);
+          cached.conn = null;
+          cached.promise = null;
+        });
+
+        mongoose.connection.on("disconnected", () => {
+          console.log("MongoDB disconnected");
+          cached.conn = null;
+          cached.promise = null;
+        });
+
         return mongoose;
       });
   }

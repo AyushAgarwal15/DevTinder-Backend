@@ -42,6 +42,29 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Initialize database connection before setting up routes
+let isConnected = false;
+
+// Middleware to ensure database connection
+const ensureDbConnected = async (req, res, next) => {
+  if (!isConnected) {
+    try {
+      await connectDB();
+      isConnected = true;
+    } catch (error) {
+      console.error("Database connection failed:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Database connection failed. Please try again later.",
+      });
+    }
+  }
+  next();
+};
+
+// Apply the database connection middleware to all routes
+app.use(ensureDbConnected);
+
 const authRouter = require("./routes/auth");
 const profileRouter = require("./routes/profile");
 const requestRouter = require("./routes/request");
@@ -63,26 +86,29 @@ app.use("/", testRouter);
 const server = http.createServer(app);
 initializeSocket(server);
 
-// And modify your server startup to only run when not in production:
+// Start server based on environment
 if (process.env.NODE_ENV !== "production") {
+  // Development
   connectDB()
     .then(() => {
+      isConnected = true;
       console.log("Database connection established.");
       server.listen(process.env.PORT || 3000, () => {
         console.log(`Server is running on port ${process.env.PORT || 3000}`);
       });
     })
     .catch((err) => {
-      console.error("Database can not be connected!!", err);
+      console.error("Database connection failed:", err);
     });
 } else {
-  // For Vercel, still connect to DB but don't start the server
+  // Production (Vercel)
   connectDB()
     .then(() => {
+      isConnected = true;
       console.log("Database connection established in production.");
     })
     .catch((err) => {
-      console.error("Database can not be connected!!", err);
+      console.error("Database connection failed in production:", err);
     });
 }
 
