@@ -28,6 +28,27 @@ const upload = multer({
 profileRouter.get("/profile/view", userAuth, async (req, res) => {
   try {
     const user = req.user;
+    if (user.isGitHubUser) {
+      // For GitHub users, return the user data from the token
+      return res.json({
+        _id: `github_${user.githubId}`,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        emailId: user.emailId,
+        photoUrl: user.photoUrl,
+        githubUrl: user.githubUrl,
+        about: user.about || "Open to make new connections 🙂",
+        githubData: user.githubData,
+        githubLanguages: user.githubLanguages || [],
+        contributionStats: user.contributionStats || {
+          totalRepos: 0,
+          totalStars: 0,
+          totalForks: 0,
+          languages: {},
+        },
+        isGitHubUser: true,
+      });
+    }
     res.send(user);
   } catch (err) {
     res.status(400).send("ERROR : " + err.message);
@@ -37,6 +58,32 @@ profileRouter.get("/profile/view", userAuth, async (req, res) => {
 profileRouter.get("/profile/view/:userId", userAuth, async (req, res) => {
   try {
     const userId = req.params.userId;
+
+    // Check if it's a GitHub user ID
+    if (userId.startsWith("github_")) {
+      // For GitHub users, we need to handle differently since they're not in MongoDB
+      const githubId = userId.replace("github_", "");
+      return res.json({
+        _id: userId,
+        firstName: req.user.firstName,
+        lastName: req.user.lastName,
+        emailId: req.user.emailId,
+        photoUrl: req.user.photoUrl,
+        githubUrl: req.user.githubUrl,
+        about: req.user.about || "Open to make new connections 🙂",
+        githubData: req.user.githubData,
+        githubLanguages: req.user.githubLanguages || [],
+        contributionStats: req.user.contributionStats || {
+          totalRepos: 0,
+          totalStars: 0,
+          totalForks: 0,
+          languages: {},
+        },
+        isGitHubUser: true,
+      });
+    }
+
+    // For MongoDB users
     const user = await User.findById(userId).select("-password -__v");
     if (!user) {
       throw new Error("User not found");
@@ -52,8 +99,24 @@ profileRouter.get("/profile/github/:userId", userAuth, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await User.findById(userId);
+    // Handle GitHub users
+    if (userId.startsWith("github_")) {
+      return res.json({
+        githubData: req.user.githubData,
+        githubRepos: req.user.githubRepos || [],
+        githubLanguages: req.user.githubLanguages || [],
+        topRepositories: req.user.topRepositories || [],
+        contributionStats: req.user.contributionStats || {
+          totalRepos: 0,
+          totalStars: 0,
+          totalForks: 0,
+          languages: {},
+        },
+      });
+    }
 
+    // Handle MongoDB users
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -64,11 +127,16 @@ profileRouter.get("/profile/github/:userId", userAuth, async (req, res) => {
 
     // Return GitHub data if available
     res.json({
-      githubData: user.githubData,
-      githubRepos: user.githubRepos,
-      githubLanguages: user.githubLanguages,
-      topRepositories: user.topRepositories,
-      contributionStats: user.contributionStats,
+      githubData: user.githubData || null,
+      githubRepos: user.githubRepos || [],
+      githubLanguages: user.githubLanguages || [],
+      topRepositories: user.topRepositories || [],
+      contributionStats: user.contributionStats || {
+        totalRepos: 0,
+        totalStars: 0,
+        totalForks: 0,
+        languages: {},
+      },
     });
   } catch (err) {
     console.error("Error fetching GitHub data:", err);

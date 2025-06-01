@@ -49,6 +49,15 @@ const generateGitHubUserToken = async (githubUser, primaryEmail) => {
     about: githubUser.bio || "Open to make new connections 🙂",
     location: githubUser.location || "",
     githubData: githubUser,
+    githubRepos: [],
+    githubLanguages: [],
+    topRepositories: [],
+    contributionStats: {
+      totalRepos: 0,
+      totalStars: 0,
+      totalForks: 0,
+      languages: {},
+    },
     isGitHubUser: true,
   };
 

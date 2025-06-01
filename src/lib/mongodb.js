@@ -8,7 +8,13 @@ if (!cached) {
 
 async function connectToDatabase() {
   if (cached.conn) {
-    return cached.conn;
+    // Check if the connection is still valid
+    if (cached.conn.connection.readyState === 1) {
+      return cached.conn;
+    }
+    // If not valid, clear the cache
+    cached.conn = null;
+    cached.promise = null;
   }
 
   if (!cached.promise) {
@@ -23,6 +29,10 @@ async function connectToDatabase() {
       autoIndex: true,
       retryWrites: true,
       retryReads: true,
+      connectTimeoutMS: 30000,
+      heartbeatFrequencyMS: 10000,
+      keepAlive: true,
+      keepAliveInitialDelay: 300000,
     };
 
     cached.promise = mongoose
@@ -30,16 +40,50 @@ async function connectToDatabase() {
       .then((mongoose) => {
         console.log("MongoDB connected successfully");
 
+        // Handle connection errors
         mongoose.connection.on("error", (err) => {
           console.error("MongoDB connection error:", err);
           cached.conn = null;
           cached.promise = null;
+          // Attempt to reconnect
+          setTimeout(() => {
+            console.log("Attempting to reconnect to MongoDB...");
+            connectToDatabase().catch(console.error);
+          }, 5000);
         });
 
+        // Handle disconnection
         mongoose.connection.on("disconnected", () => {
           console.log("MongoDB disconnected");
           cached.conn = null;
           cached.promise = null;
+          // Attempt to reconnect
+          setTimeout(() => {
+            console.log("Attempting to reconnect to MongoDB...");
+            connectToDatabase().catch(console.error);
+          }, 5000);
+        });
+
+        // Handle successful reconnection
+        mongoose.connection.on("reconnected", () => {
+          console.log("MongoDB reconnected successfully");
+        });
+
+        // Handle connection close
+        mongoose.connection.on("close", () => {
+          console.log("MongoDB connection closed");
+        });
+
+        // Handle process termination
+        process.on("SIGINT", async () => {
+          try {
+            await mongoose.connection.close();
+            console.log("MongoDB connection closed through app termination");
+            process.exit(0);
+          } catch (err) {
+            console.error("Error closing MongoDB connection:", err);
+            process.exit(1);
+          }
         });
 
         return mongoose;
