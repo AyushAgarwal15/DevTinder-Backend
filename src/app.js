@@ -8,6 +8,7 @@ const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const http = require("http");
+const mongoose = require("mongoose");
 
 // Define allowed origins based on environment
 const allowedOrigins = [
@@ -67,17 +68,22 @@ const ensureDbConnected = async (req, res, next) => {
     try {
       while (!isConnected && connectionRetries < MAX_RETRIES) {
         try {
-          await Promise.race([
-            connectDB(),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error("Connection attempt timed out")),
-                15000
-              )
-            ),
-          ]);
+          const mongoose = await connectDB();
+          // Wait for the connection to be ready
+          if (mongoose.connection.readyState !== 1) {
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                reject(new Error("Connection timeout"));
+              }, 10000);
+
+              mongoose.connection.once("connected", () => {
+                clearTimeout(timeout);
+                resolve();
+              });
+            });
+          }
           isConnected = true;
-          connectionRetries = 0; // Reset retries on successful connection
+          connectionRetries = 0;
           console.log("Database connection established.");
           break;
         } catch (error) {
@@ -115,10 +121,13 @@ app.use((req, res, next) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
-    database: isConnected ? "connected" : "disconnected",
+    database: {
+      connected: isConnected,
+      retries: connectionRetries,
+      readyState: isConnected ? mongoose.connection.readyState : 0,
+    },
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString(),
-    retries: connectionRetries,
   });
 });
 
@@ -169,15 +178,20 @@ if (process.env.NODE_ENV !== "production") {
   // Development
   const startServer = async () => {
     try {
-      await Promise.race([
-        connectDB(),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Initial connection timed out")),
-            30000
-          )
-        ),
-      ]);
+      const mongoose = await connectDB();
+      // Wait for the connection to be ready
+      if (mongoose.connection.readyState !== 1) {
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Initial connection timeout"));
+          }, 30000);
+
+          mongoose.connection.once("connected", () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+      }
       isConnected = true;
       console.log("Database connection established.");
       const port = process.env.PORT || 3000;
@@ -195,15 +209,20 @@ if (process.env.NODE_ENV !== "production") {
   // Production (Vercel)
   const initializeProduction = async () => {
     try {
-      await Promise.race([
-        connectDB(),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Initial connection timed out")),
-            30000
-          )
-        ),
-      ]);
+      const mongoose = await connectDB();
+      // Wait for the connection to be ready
+      if (mongoose.connection.readyState !== 1) {
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Initial connection timeout"));
+          }, 30000);
+
+          mongoose.connection.once("connected", () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+      }
       isConnected = true;
       console.log("Database connection established in production.");
     } catch (err) {

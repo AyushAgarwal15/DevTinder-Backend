@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
-// Disable mongoose buffering globally
-mongoose.set("bufferCommands", false);
+// Don't disable buffering globally
+mongoose.set("bufferCommands", true);
 
 let cached = global.mongoose;
 
@@ -22,25 +22,17 @@ async function connectToDatabase() {
 
   if (!cached.promise) {
     const opts = {
-      bufferCommands: false, // Disable buffering
-      serverSelectionTimeoutMS: 30000, // Reduced from 60000
-      socketTimeoutMS: 45000, // Reduced from 60000
-      maxIdleTimeMS: 45000, // Reduced from 60000
-      maxPoolSize: 50, // Increased from 10
-      minPoolSize: 10, // Increased from 1
+      bufferCommands: true,
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 50,
+      minPoolSize: 10,
       family: 4,
       autoIndex: true,
       retryWrites: true,
       retryReads: true,
       connectTimeoutMS: 20000,
       heartbeatFrequencyMS: 5000,
-      keepAlive: true,
-      keepAliveInitialDelay: 30000,
-      autoCreate: true,
-      writeConcern: {
-        w: "majority",
-        j: true,
-      },
     };
 
     cached.promise = mongoose
@@ -74,18 +66,8 @@ async function connectToDatabase() {
         // Handle connection close
         mongoose.connection.on("close", () => {
           console.log("MongoDB connection closed");
-        });
-
-        // Handle process termination
-        process.on("SIGINT", async () => {
-          try {
-            await mongoose.connection.close();
-            console.log("MongoDB connection closed through app termination");
-            process.exit(0);
-          } catch (err) {
-            console.error("Error closing MongoDB connection:", err);
-            process.exit(1);
-          }
+          cached.conn = null;
+          cached.promise = null;
         });
 
         return mongoose;
@@ -94,9 +76,18 @@ async function connectToDatabase() {
 
   try {
     cached.conn = await cached.promise;
-    // Verify connection is successful
+    // Wait for the connection to be ready
     if (cached.conn.connection.readyState !== 1) {
-      throw new Error("Failed to establish MongoDB connection");
+      await new Promise((resolve) => {
+        cached.conn.connection.once("connected", resolve);
+        setTimeout(() => {
+          if (cached.conn.connection.readyState !== 1) {
+            cached.conn = null;
+            cached.promise = null;
+            throw new Error("Failed to establish MongoDB connection");
+          }
+        }, 5000);
+      });
     }
   } catch (e) {
     cached.promise = null;
