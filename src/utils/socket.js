@@ -2,7 +2,9 @@ const socket = require("socket.io");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { Chat } = require("../models/chat");
+const User = require("../models/user");
 const connectionRequest = require("../models/connectionRequest");
+const mongoose = require("mongoose");
 
 // Simple maps to track users and their current active chat room
 const activeUsers = new Map(); // userId -> socketId
@@ -24,7 +26,7 @@ const initializeSocket = (server) => {
   });
 
   // Add authentication middleware
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
 
     if (!token) {
@@ -34,15 +36,26 @@ const initializeSocket = (server) => {
     try {
       // Verify the token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      console.log("Decoded token:", decoded);
+
+      // Find the user in MongoDB
+      let user;
+      if (decoded.isGitHubUser) {
+        user = await User.findOne({ githubId: decoded.githubId });
+      } else {
+        user = await User.findOne({ _id: decoded._id });
+      }
+
+      if (!user) {
+        return next(new Error("User not found"));
+      }
 
       // Store user data in socket object
-      socket.user = decoded;
-
-      // If your token contains _id instead of id, make sure to handle it
-      if (!socket.user.id && socket.user._id) {
-        socket.user.id = socket.user._id;
-      }
+      socket.user = {
+        _id: user._id.toString(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        isGitHubUser: user.isGitHubUser,
+      };
 
       next();
     } catch (err) {
@@ -52,7 +65,7 @@ const initializeSocket = (server) => {
   });
 
   io.on("connection", (socket) => {
-    const userId = socket.user.id;
+    const userId = socket.user._id;
     console.log(`User ${userId} connected with socket ID ${socket.id}`);
 
     // Register this user's socket connection
@@ -61,9 +74,9 @@ const initializeSocket = (server) => {
     // User is not in any chat room initially
     userCurrentChatRoom.delete(userId);
 
-    socket.on("joinChat", ({ firstName, userId, targetUserId }) => {
+    socket.on("joinChat", async ({ firstName, userId, targetUserId }) => {
       // Additional validation to ensure user can only join their own chats
-      if (userId !== socket.user.id) {
+      if (userId !== socket.user._id) {
         socket.emit("error", { message: "Unauthorized access to chat room" });
         return;
       }
@@ -83,47 +96,63 @@ const initializeSocket = (server) => {
       // Notify the room that user has joined
       socket.to(chatRoomId).emit("userJoined", { userId, firstName });
 
-      // Load and send chat history
-      Chat.findOne({
-        participants: { $all: [userId, targetUserId] },
-      })
-        .then((chat) => {
-          if (chat && chat.messages && chat.messages.length > 0) {
-            // Format messages for frontend and send history
-            const formattedMessages = chat.messages.map((msg) => ({
-              senderId: {
-                _id: msg.senderId.toString(),
-                firstName: "User", // We don't have firstName stored in the message schema
-              },
-              text: msg.text,
-              _id: msg._id.toString(),
-              createdAt: msg.createdAt,
-              updatedAt: msg.updatedAt,
-            }));
-
-            socket.emit("chatHistory", formattedMessages);
-          }
-        })
-        .catch((err) => {
-          console.error("Error loading chat history:", err);
-          socket.emit("error", { message: "Failed to load chat history" });
+      try {
+        // Load and send chat history with populated user data
+        const chat = await Chat.findOne({
+          participants: { $all: [userId, targetUserId] },
+        }).populate({
+          path: "messages.senderId",
+          select: "firstName lastName",
         });
+
+        if (chat && chat.messages && chat.messages.length > 0) {
+          // Format messages for frontend
+          const formattedMessages = chat.messages.map((msg) => ({
+            senderId: {
+              _id: msg.senderId._id.toString(),
+              firstName: msg.senderId.firstName || "User",
+            },
+            text: msg.text,
+            _id: msg._id.toString(),
+            createdAt: msg.createdAt,
+            updatedAt: msg.updatedAt,
+          }));
+
+          socket.emit("chatHistory", formattedMessages);
+        }
+      } catch (err) {
+        console.error("Error loading chat history:", err);
+        socket.emit("error", { message: "Failed to load chat history" });
+      }
     });
 
     socket.on(
       "sendMessage",
       async ({ firstName, userId, targetUserId, text }) => {
         try {
+          // Ensure we're working with valid ObjectIds
+          const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : null;
+          const targetObjectId = mongoose.Types.ObjectId.isValid(targetUserId)
+            ? new mongoose.Types.ObjectId(targetUserId)
+            : null;
+
+          if (!userObjectId || !targetObjectId) {
+            socket.emit("error", { message: "Invalid user IDs" });
+            return;
+          }
+
           const isConnected = await connectionRequest.findOne({
             $or: [
               {
-                fromUserId: userId,
-                toUserId: targetUserId,
+                fromUserId: userObjectId,
+                toUserId: targetObjectId,
                 status: "accepted",
               },
               {
-                fromUserId: targetUserId,
-                toUserId: userId,
+                fromUserId: targetObjectId,
+                toUserId: userObjectId,
                 status: "accepted",
               },
             ],
@@ -135,85 +164,72 @@ const initializeSocket = (server) => {
           }
 
           // Additional validation to ensure user can only send messages as themselves
-          if (userId !== socket.user.id) {
+          if (userId !== socket.user._id) {
             socket.emit("error", { message: "Unauthorized message sending" });
             return;
           }
 
           const chatRoomId = getSecretChatRoomId(userId, targetUserId);
 
-          // Format message in a way frontend expects
-          const message = {
+          // Format message
+          const messageData = {
+            senderId: userObjectId,
+            text,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+
+          // Save message to database
+          let chat = await Chat.findOne({
+            participants: { $all: [userObjectId, targetObjectId] },
+          });
+
+          if (!chat) {
+            chat = new Chat({
+              participants: [userObjectId, targetObjectId],
+              messages: [messageData],
+            });
+          } else {
+            chat.messages.push(messageData);
+          }
+
+          await chat.save();
+
+          // Format message for frontend
+          const frontendMessage = {
             senderId: {
               _id: userId,
               firstName: firstName,
             },
             text,
-            _id: Date.now().toString(),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            _id: chat.messages[chat.messages.length - 1]._id.toString(),
+            createdAt: messageData.createdAt.toISOString(),
+            updatedAt: messageData.updatedAt.toISOString(),
           };
 
-          // save message to database
-          let chat = await Chat.findOne({
-            participants: { $all: [userId, targetUserId] },
-          });
+          // Emit the message to the chat room
+          io.to(chatRoomId).emit("receivedMessage", frontendMessage);
 
-          if (!chat) {
-            // Create a new chat if it doesn't exist
-            chat = new Chat({
-              participants: [userId, targetUserId],
-              messages: [{ senderId: userId, text, createdAt: new Date() }],
-            });
-          } else {
-            // Add message to existing chat
-            chat.messages.push({
-              senderId: userId,
-              text,
-              createdAt: new Date(),
-            });
-          }
-
-          await chat.save();
-
-          // Emit the message to the chat room for anyone in it
-          io.to(chatRoomId).emit("receivedMessage", message);
-
-          // Check if target user is connected
+          // Handle notifications
           const targetSocketId = activeUsers.get(targetUserId);
-
           if (targetSocketId) {
-            // Get who target user is currently chatting with
             const targetUserCurrentChat = userCurrentChatRoom.get(targetUserId);
-
-            // If target user is not chatting with the sender, send a notification
             if (targetUserCurrentChat !== userId) {
-              console.log(
-                `Sending notification to ${targetUserId} about message from ${firstName}`
-              );
               io.to(targetSocketId).emit("messageNotification", {
-                ...message,
-                notification: true, // Add flag to identify this as a notification
+                ...frontendMessage,
+                notification: true,
               });
-            } else {
-              console.log(
-                `No notification needed - ${targetUserId} is already chatting with ${userId}`
-              );
             }
-          } else {
-            console.log(
-              `Target user ${targetUserId} is not connected, can't send notification`
-            );
           }
         } catch (error) {
-          console.error("Error saving message to database:", error);
-          socket.emit("error", { message: "Failed to save message" });
+          console.error("Error sending message:", error);
+          socket.emit("error", { message: "Failed to send message" });
         }
       }
     );
 
     socket.on("leaveChat", ({ userId, targetUserId }) => {
-      if (userId !== socket.user.id) {
+      if (userId !== socket.user._id) {
         socket.emit("error", { message: "Unauthorized action" });
         return;
       }
@@ -227,15 +243,8 @@ const initializeSocket = (server) => {
 
     socket.on("disconnect", () => {
       console.log(`User ${userId} disconnected`);
-
-      // Remove user from active users
       activeUsers.delete(userId);
-
-      // Clear chat room tracking
       userCurrentChatRoom.delete(userId);
-
-      // Let others know this user is offline
-      socket.broadcast.emit("userOffline", { userId });
     });
   });
 

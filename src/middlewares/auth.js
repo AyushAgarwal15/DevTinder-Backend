@@ -34,27 +34,48 @@ const userAuth = async (req, res, next) => {
       });
     }
 
-    // Check if this is a GitHub user (has isGitHubUser flag)
-    if (decodedToken.isGitHubUser) {
-      // For GitHub users, we use the token data directly
-      req.user = decodedToken;
-      next();
-      return;
-    }
-
-    // For regular users, find in MongoDB
     try {
-      const user = await User.findOne({ _id: decodedToken._id });
+      let user;
+      // Check if this is a GitHub user
+      if (decodedToken.isGitHubUser) {
+        // For GitHub users, find or create their MongoDB document
+        user = await User.findOne({ githubId: decodedToken.githubId });
+
+        if (!user) {
+          // Create a new user document if one doesn't exist
+          user = await User.create({
+            githubId: decodedToken.githubId,
+            email: decodedToken.email,
+            firstName: decodedToken.name
+              ? decodedToken.name.split(" ")[0]
+              : "GitHub",
+            lastName: decodedToken.name
+              ? decodedToken.name.split(" ")[1] || "User"
+              : "User",
+            avatar: decodedToken.avatar,
+            isGitHubUser: true,
+          });
+        }
+      } else {
+        // For regular users, find in MongoDB
+        user = await User.findOne({ _id: decodedToken._id });
+      }
+
       if (!user) {
         return res.status(401).json({
           status: "error",
           message: "User not found in database",
-          details: `User ID ${decodedToken._id} not found`,
+          details: decodedToken.isGitHubUser
+            ? `GitHub user ${decodedToken.githubId} not found`
+            : `User ID ${decodedToken._id} not found`,
         });
       }
+
+      // Set the MongoDB user document in req.user
       req.user = user;
       next();
     } catch (dbError) {
+      console.error("Database error:", dbError);
       return res.status(500).json({
         status: "error",
         message: "Database error while finding user",

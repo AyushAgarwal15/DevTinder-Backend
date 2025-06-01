@@ -28,8 +28,79 @@ const handleGitHubError = (res, error, isConnectFlow = false) => {
   );
 };
 
+// Helper function to fetch GitHub user's repositories and languages
+async function fetchGitHubUserData(accessToken, githubUser) {
+  try {
+    // Get user's repositories
+    const reposResponse = await axios.get(
+      `https://api.github.com/users/${githubUser.login}/repos?sort=updated&per_page=100`,
+      { headers: { Authorization: `token ${accessToken}` } }
+    );
+
+    const repos = reposResponse.data;
+
+    // Extract languages from repos
+    const languages = new Set();
+    repos.forEach((repo) => {
+      if (repo.language) {
+        languages.add(repo.language);
+      }
+    });
+
+    // Find top repositories (by stars)
+    const topRepos = [...repos]
+      .sort((a, b) => b.stargazers_count - a.stargazers_count)
+      .slice(0, 5)
+      .map((repo) => ({
+        name: repo.name,
+        description: repo.description,
+        url: repo.html_url,
+        stars: repo.stargazers_count,
+        forks: repo.forks_count,
+        language: repo.language,
+      }));
+
+    // Calculate contribution stats
+    const contributionStats = {
+      totalRepos: repos.length,
+      totalStars: repos.reduce((sum, repo) => sum + repo.stargazers_count, 0),
+      totalForks: repos.reduce((sum, repo) => sum + repo.forks_count, 0),
+      languages: Object.fromEntries(
+        Array.from(languages).map((lang) => [
+          lang,
+          repos.filter((repo) => repo.language === lang).length,
+        ])
+      ),
+    };
+
+    return {
+      repos: repos.map((repo) => ({
+        id: repo.id,
+        name: repo.name,
+        description: repo.description,
+        url: repo.html_url,
+        stars: repo.stargazers_count,
+        forks: repo.forks_count,
+        language: repo.language,
+        created_at: repo.created_at,
+        updated_at: repo.updated_at,
+      })),
+      languages: Array.from(languages),
+      topRepositories: topRepos,
+      contributionStats,
+    };
+  } catch (error) {
+    console.error("Error fetching GitHub data:", error);
+    throw error;
+  }
+}
+
 // Helper function to generate JWT token for GitHub user
-const generateGitHubUserToken = async (githubUser, primaryEmail) => {
+const generateGitHubUserToken = async (
+  githubUser,
+  primaryEmail,
+  githubData
+) => {
   const firstName = githubUser.name
     ? githubUser.name.split(" ")[0]
     : githubUser.login;
@@ -49,15 +120,10 @@ const generateGitHubUserToken = async (githubUser, primaryEmail) => {
     about: githubUser.bio || "Open to make new connections 🙂",
     location: githubUser.location || "",
     githubData: githubUser,
-    githubRepos: [],
-    githubLanguages: [],
-    topRepositories: [],
-    contributionStats: {
-      totalRepos: 0,
-      totalStars: 0,
-      totalForks: 0,
-      languages: {},
-    },
+    githubRepos: githubData.repos,
+    githubLanguages: githubData.languages,
+    topRepositories: githubData.topRepositories,
+    contributionStats: githubData.contributionStats,
     isGitHubUser: true,
   };
 
@@ -131,10 +197,14 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
       throw new Error("Failed to get required GitHub user data");
     }
 
+    // Fetch GitHub repositories and languages
+    const githubData = await fetchGitHubUserData(access_token, githubUser);
+
     // Generate JWT token with GitHub user data
     const { token, userData } = await generateGitHubUserToken(
       githubUser,
-      primaryEmail
+      primaryEmail,
+      githubData
     );
 
     // Set cookie with the token
