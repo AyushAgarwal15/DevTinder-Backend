@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const validator = require("validator");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const { generateInitialsAvatar } = require("../utils/avatarGenerator");
 
 const userSchema = new mongoose.Schema(
   {
@@ -73,8 +74,9 @@ const userSchema = new mongoose.Schema(
     },
     photoUrl: {
       type: String,
-      default:
-        "https://res.cloudinary.com/devtinder/image/upload/v1/devtinder_profiles/default-avatar.png",
+      default: function () {
+        return generateInitialsAvatar(this.firstName, this.lastName);
+      },
       validate(value) {
         if (!validator.isURL(value)) {
           throw new Error("Invalid URL: " + value);

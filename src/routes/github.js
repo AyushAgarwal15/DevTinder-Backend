@@ -1,8 +1,10 @@
 const express = require("express");
 const axios = require("axios");
 const githubRouter = express.Router();
+const jwt = require("jsonwebtoken");
+const userAuth = require("../middlewares/auth");
 const User = require("../models/user");
-const { userAuth } = require("../middlewares/auth");
+const { generateInitialsAvatar } = require("../utils/avatarGenerator");
 
 // Helper function to get the correct callback URL
 const getCallbackURL = (path) => {
@@ -14,11 +16,56 @@ const getCallbackURL = (path) => {
   return `${process.env.CLIENT_ORIGIN.replace("5173", "7777")}${path}`;
 };
 
+// Helper function to handle GitHub auth errors
+const handleGitHubError = (res, error, isConnectFlow = false) => {
+  console.error("GitHub OAuth Error:", error);
+  const errorMessage = encodeURIComponent(
+    error.response?.data?.message || error.message || "Authentication failed"
+  );
+  const redirectPath = isConnectFlow ? "profile" : "login";
+  res.redirect(
+    `${process.env.CLIENT_ORIGIN}/${redirectPath}?error=github_auth_failed&message=${errorMessage}`
+  );
+};
+
+// Helper function to generate JWT token for GitHub user
+const generateGitHubUserToken = async (githubUser, primaryEmail) => {
+  const firstName = githubUser.name
+    ? githubUser.name.split(" ")[0]
+    : githubUser.login;
+  const lastName = githubUser.name
+    ? githubUser.name.split(" ").slice(1).join(" ")
+    : "";
+
+  const userData = {
+    _id: `github_${githubUser.id}`,
+    githubId: githubUser.id.toString(),
+    firstName,
+    lastName,
+    emailId: primaryEmail,
+    photoUrl:
+      githubUser.avatar_url || generateInitialsAvatar(firstName, lastName),
+    githubUrl: githubUser.html_url,
+    about: githubUser.bio || "Open to make new connections 🙂",
+    location: githubUser.location || "",
+    githubData: githubUser,
+    isGitHubUser: true,
+  };
+
+  const token = jwt.sign(userData, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
+
+  return { token, userData };
+};
+
 // Initiate GitHub OAuth flow
 githubRouter.get("/auth/github", (req, res) => {
   const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${
     process.env.GITHUB_CLIENT_ID
-  }&redirect_uri=${getCallbackURL("/auth/github/callback")}&scope=user,repo`;
+  }&redirect_uri=${getCallbackURL(
+    "/auth/github/callback"
+  )}&scope=user,repo,email`;
   res.redirect(githubAuthUrl);
 });
 
@@ -27,10 +74,12 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
   try {
     console.log("GitHub OAuth callback received");
     const { code } = req.query;
-    console.log("GitHub code received:", code ? "Present" : "Missing");
+
+    if (!code) {
+      throw new Error("No authorization code received from GitHub");
+    }
 
     // Exchange code for access token
-    console.log("Exchanging code for access token...");
     const tokenResponse = await axios.post(
       "https://github.com/login/oauth/access_token",
       {
@@ -46,84 +95,51 @@ githubRouter.get("/auth/github/callback", async (req, res) => {
       }
     );
 
-    console.log("Token received:", tokenResponse.data ? "Success" : "Failed");
+    if (tokenResponse.data.error) {
+      throw new Error(
+        tokenResponse.data.error_description || "Failed to get access token"
+      );
+    }
+
     const { access_token } = tokenResponse.data;
 
     // Get user info from GitHub
-    const userResponse = await axios.get("https://api.github.com/user", {
-      headers: {
-        Authorization: `token ${access_token}`,
-      },
-    });
+    const [userResponse, emailResponse] = await Promise.all([
+      axios.get("https://api.github.com/user", {
+        headers: { Authorization: `token ${access_token}` },
+      }),
+      axios.get("https://api.github.com/user/emails", {
+        headers: { Authorization: `token ${access_token}` },
+      }),
+    ]);
 
     const githubUser = userResponse.data;
+    const primaryEmail = emailResponse.data.find(
+      (email) => email.primary
+    )?.email;
 
-    // Check if user already exists with this GitHub ID
-    let user = await User.findOne({ githubId: githubUser.id.toString() });
-
-    if (!user) {
-      // Check if user exists with this email
-      const userEmail = await axios.get("https://api.github.com/user/emails", {
-        headers: {
-          Authorization: `token ${access_token}`,
-        },
-      });
-
-      const primaryEmail = userEmail.data.find((email) => email.primary)?.email;
-
-      if (primaryEmail) {
-        user = await User.findOne({ emailId: primaryEmail });
-
-        if (user) {
-          // Update existing user with GitHub info
-          user.githubId = githubUser.id.toString();
-          user.githubData = githubUser;
-          await user.save();
-        } else {
-          // Create new user
-          user = new User({
-            firstName: githubUser.name
-              ? githubUser.name.split(" ")[0]
-              : githubUser.login,
-            lastName: githubUser.name
-              ? githubUser.name.split(" ").slice(1).join(" ")
-              : "",
-            emailId: primaryEmail,
-            githubId: githubUser.id.toString(),
-            photoUrl: githubUser.avatar_url,
-            githubUrl: githubUser.html_url,
-            about: githubUser.bio || "Open to make new connections 🙂",
-            location: githubUser.location || "",
-            githubData: githubUser,
-          });
-
-          await user.save();
-        }
-      }
+    if (!githubUser.id || !primaryEmail) {
+      throw new Error("Failed to get required GitHub user data");
     }
 
-    // Fetch and update GitHub repos
-    await updateGithubRepos(user._id, access_token);
+    // Generate JWT token with GitHub user data
+    const { token, userData } = await generateGitHubUserToken(
+      githubUser,
+      primaryEmail
+    );
 
-    // Issue JWT
-    const token = await user.getJWT();
-    console.log("JWT token generated for user:", user._id.toString());
-
-    // Add token to cookie
-    console.log("Setting cookies with sameSite=none, secure=true");
+    // Set cookie with the token
     res.cookie("token", token, {
-      expires: new Date(Date.now() + 8 * 3600000),
+      expires: new Date(Date.now() + 7 * 24 * 3600000), // 7 days
       sameSite: "none",
       secure: true,
       httpOnly: true,
     });
 
-    // Redirect to frontend
-    console.log("Redirecting to:", `${process.env.CLIENT_ORIGIN}/profile`);
-    res.redirect(`${process.env.CLIENT_ORIGIN}/profile`);
+    // Redirect to frontend with success
+    res.redirect(`${process.env.CLIENT_ORIGIN}/`);
   } catch (error) {
-    console.error("GitHub OAuth Error:", error);
-    res.redirect(`${process.env.CLIENT_ORIGIN}/login?error=github_auth_failed`);
+    handleGitHubError(res, error);
   }
 });
 
@@ -269,8 +285,12 @@ githubRouter.get("/github/profile", userAuth, async (req, res) => {
 // Helper function to update GitHub repos data
 async function updateGithubRepos(userId, accessToken = null) {
   try {
-    const user = await User.findById(userId);
+    // For GitHub-only users (not in MongoDB)
+    if (userId.startsWith("github_")) {
+      return true; // Skip repo updates for GitHub-only users
+    }
 
+    const user = await User.findById(userId);
     if (!user || !user.githubId) {
       throw new Error("User not found or GitHub not connected");
     }
@@ -282,9 +302,7 @@ async function updateGithubRepos(userId, accessToken = null) {
     // Get user's repositories
     const reposResponse = await axios.get(
       `https://api.github.com/users/${user.githubData.login}/repos?sort=updated&per_page=100`,
-      {
-        headers,
-      }
+      { headers }
     );
 
     const repos = reposResponse.data;
@@ -334,8 +352,7 @@ async function updateGithubRepos(userId, accessToken = null) {
 
     user.topRepositories = topRepos;
 
-    // Get contribution stats (this is a simplified approach)
-    // In a production app, you might want to use the GitHub GraphQL API to get more detailed stats
+    // Get contribution stats
     const contributionStats = {
       totalRepos: repos.length,
       totalStars: repos.reduce((sum, repo) => sum + repo.stargazers_count, 0),
@@ -352,7 +369,6 @@ async function updateGithubRepos(userId, accessToken = null) {
 
     // Save updated user
     await user.save();
-
     return true;
   } catch (error) {
     console.error("Error updating GitHub repos:", error);
